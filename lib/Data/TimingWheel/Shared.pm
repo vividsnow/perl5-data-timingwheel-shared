@@ -85,19 +85,22 @@ cross-user sharing; it defaults to C<0600> (owner-only).
     my $id = $tw->schedule($delay, $payload); # alias for add
     my $ok = $tw->cancel($id);             # 1 if cancelled, 0 if already fired/invalid
 
-C<add> schedules a timer to fire C<$delay> ticks from now (a delay below 1 is
-treated as 1) carrying the integer C<$payload>, and returns a timer id; it croaks
-if the timer pool is full. C<cancel> removes a still-pending timer by its id,
-returning 1 if it was cancelled or 0 if it had already fired or the id is not
-active.
+C<add> schedules a timer to fire C<$delay> ticks from now (a delay below 1,
+including a negative delay, is treated as 1) carrying the integer C<$payload>,
+and returns an opaque timer id; it croaks if the timer pool is full. C<cancel>
+removes a still-pending timer by its id, returning 1 if it was cancelled or 0 if
+it had already fired or the id is not active. A timer id carries a generation
+tag, so cancelling a stale id whose slot has since been reused correctly returns
+0 rather than cancelling the unrelated timer now occupying that slot.
 
 =head2 Advancing the clock
 
     my @due = $tw->advance($ticks);   # advance by $ticks (default 1)
     my @due = $tw->advance;           # advance by one tick
 
-C<advance> moves the wheel forward by C<$ticks> ticks (default 1) and returns the
-list of payloads of every timer that came due during those ticks, in fire order.
+C<advance> moves the wheel forward by C<$ticks> ticks (default 1; must be >= 0 --
+a negative count croaks) and returns the list of payloads of every timer that
+came due during those ticks, in fire order.
 Timers that fire are removed from the wheel automatically. Cost is O(ticks +
 fired) plus, for long timers, one visit per rotation.
 
@@ -141,6 +144,18 @@ ownership and dead-owner recovery. Scheduling, cancelling, and each tick of an
 advance are short bounded list operations, so a crash leaves the wheel consistent
 up to the last completed operation. B<Limitation>: PID reuse is not detected
 (very unlikely in practice).
+
+Reader-slot exhaustion (slotless readers): dead-process recovery attributes a
+crashed lock holder's contribution through its reader-slot. The slot table holds
+1024 entries (one per concurrent reader process). If more than that many reader
+processes share one mapping at once, a reader that cannot claim a slot proceeds
+"slotless" -- it still takes the read lock but leaves no per-process record. If
+such a slotless reader is then killed while holding the read lock, its share of
+the lock cannot be attributed to a dead process, so writer recovery cannot
+reclaim it and writers may block until the mapping is recreated. Reaching this
+needs more than 1024 concurrent reader processes on one mapping plus a crash in
+the brief read-lock window; the dead-process slot reclaim keeps the table from
+filling with stale entries, so in practice it is very unlikely.
 
 =head1 SEE ALSO
 

@@ -9,7 +9,8 @@
     if (!sv_isobject(sv) || !sv_derived_from(sv, "Data::TimingWheel::Shared")) \
         croak("Expected a Data::TimingWheel::Shared object"); \
     TwHandle *h = INT2PTR(TwHandle*, SvIV(SvRV(sv))); \
-    if (!h) croak("Attempted to use a destroyed Data::TimingWheel::Shared object")
+    if (!h) croak("Attempted to use a destroyed Data::TimingWheel::Shared object"); \
+    sv_2mortal(SvREFCNT_inc(SvRV(sv)))
 
 #define MAKE_OBJ(class, handle) \
     SV *obj = newSViv(PTR2IV(handle)); \
@@ -30,12 +31,15 @@ new(class, path = &PL_sv_undef, num_slots = 512, capacity = 0, ...)
   PREINIT:
     char errbuf[TW_ERR_BUFLEN];
   CODE:
-    const char *p = (SvGETMAGIC(path), SvOK(path)) ? SvPV_nolen(path) : NULL;
+    /* Optional 5th arg: file mode for a newly-created file-backed segment
+     * (default 0600, owner-only). Pass e.g. 0660 for cross-user sharing.
+     * Resolve it BEFORE capturing the path PV: its get-magic can run Perl
+     * code that may realloc/free that PV, so capture p last, right before
+     * tw_create(). */
+    mode_t mode = (items > 4 && (SvGETMAGIC(ST(4)), SvOK(ST(4)))) ? (mode_t)SvUV(ST(4)) : 0600;
     if (capacity < 1)
         croak("Data::TimingWheel::Shared->new: capacity must be >= 1");
-    /* Optional 5th arg: file mode for a newly-created file-backed segment
-     * (default 0600, owner-only). Pass e.g. 0660 for cross-user sharing. */
-    mode_t mode = (items > 4 && (SvGETMAGIC(ST(4)), SvOK(ST(4)))) ? (mode_t)SvUV(ST(4)) : 0600;
+    const char *p = (SvGETMAGIC(path), SvOK(path)) ? SvPV_nolen(path) : NULL;
     TwHandle *h = tw_create(p, (uint64_t)num_slots, (uint64_t)capacity, mode, errbuf);
     if (!h) croak("Data::TimingWheel::Shared->new: %s", errbuf);
     MAKE_OBJ(class, h);
@@ -85,14 +89,16 @@ DESTROY(self)
 UV
 add(self, delay, payload)
     SV *self
-    UV delay
+    IV delay
     UV payload
   PREINIT:
     EXTRACT(self);
     int64_t id;
   CODE:
+    /* signed delay: a negative value (e.g. from clock skew) clamps to 1 tick per
+     * the POD, instead of UV-wrapping to a ~2^64 delay that never fires (slot leak) */
     tw_rwlock_wrlock(h);
-    id = tw_add_locked(h, (uint64_t)delay, (uint64_t)payload);
+    id = tw_add_locked(h, delay < 1 ? 1 : (uint64_t)delay, (uint64_t)payload);
     __atomic_fetch_add(&h->hdr->stat_ops, 1, __ATOMIC_RELAXED);
     tw_rwlock_wrunlock(h);
     if (id < 0) croak("Data::TimingWheel::Shared->add: timer pool is full (capacity %u)", (unsigned)h->capacity);
@@ -117,12 +123,15 @@ cancel(self, timer_id)
 void
 advance(self, ticks = 1)
     SV *self
-    UV ticks
+    IV ticks
   PREINIT:
     EXTRACT(self);
   PPCODE:
     {
         uint64_t *out = NULL, fired = 0, i, cap = h->capacity;
+        /* signed: reject a negative tick count (would UV-wrap to ~2^64 and spin the
+         * per-tick loop under the write lock, wedging every sharer) */
+        if (ticks < 0) croak("Data::TimingWheel::Shared->advance: ticks must be >= 0");
         if (cap) { Newx(out, (size_t)cap, uint64_t); SAVEFREEPV(out); }   /* alloc BEFORE the lock */
         tw_rwlock_wrlock(h);
         fired = cap ? tw_advance_locked(h, (uint64_t)ticks, out, cap) : 0;
