@@ -12,6 +12,20 @@
     if (!h) croak("Attempted to use a destroyed Data::TimingWheel::Shared object"); \
     sv_2mortal(SvREFCNT_inc(SvRV(sv)))
 
+/* Re-read the handle after a call that can run Perl code. EXTRACT's
+ * sv_2mortal(SvREFCNT_inc(...)) pin only blocks REFCOUNT-driven destruction;
+ * an explicit $obj->DESTROY frees the handle regardless and zeroes the IV.
+ * NOTE: a typed parameter with a DEFAULT (e.g. `ticks = 1`) is converted by
+ * xsubpp AFTER the PREINIT block, not in INPUT -- so its magic runs after
+ * EXTRACT captured the handle, unlike a typed parameter with no default.
+ * The same Perl can also REPLACE the invocant ($obj = 42 mutates ST(0),
+ * because Perl passes aliases), hence the SvROK re-check before SvRV. */
+#define REEXTRACT(sv) \
+    if (!SvROK(sv)) \
+        croak("Data::TimingWheel::Shared object was replaced during the call"); \
+    h = INT2PTR(TwHandle*, SvIV(SvRV(sv))); \
+    if (!h) croak("Data::TimingWheel::Shared object destroyed during the call")
+
 #define MAKE_OBJ(class, handle) \
     SV *obj = newSViv(PTR2IV(handle)); \
     SV *ref = newRV_noinc(obj); \
@@ -128,6 +142,7 @@ advance(self, ticks = 1)
     EXTRACT(self);
   PPCODE:
     {
+        REEXTRACT(self);   /* `ticks = 1` is converted after PREINIT, so its magic already ran */
         uint64_t *out = NULL, fired = 0, i, cap = h->capacity;
         /* signed: reject a negative tick count (would UV-wrap to ~2^64 and spin the
          * per-tick loop under the write lock, wedging every sharer) */
