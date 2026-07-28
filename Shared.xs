@@ -10,6 +10,7 @@
         croak("Expected a Data::TimingWheel::Shared object"); \
     TwHandle *h = INT2PTR(TwHandle*, SvIV(SvRV(sv))); \
     if (!h) croak("Attempted to use a destroyed Data::TimingWheel::Shared object"); \
+    TwHandle *h0 = h; PERL_UNUSED_VAR(h0); \
     sv_2mortal(SvREFCNT_inc(SvRV(sv)))
 
 /* Re-read the handle after a call that can run Perl code. EXTRACT's
@@ -24,7 +25,7 @@
     if (!SvROK(sv)) \
         croak("Data::TimingWheel::Shared object was replaced during the call"); \
     h = INT2PTR(TwHandle*, SvIV(SvRV(sv))); \
-    if (!h) croak("Data::TimingWheel::Shared object destroyed during the call")
+    if (h != h0) croak("Data::TimingWheel::Shared object replaced or destroyed during the call")
 
 #define MAKE_OBJ(class, handle) \
     SV *obj = newSViv(PTR2IV(handle)); \
