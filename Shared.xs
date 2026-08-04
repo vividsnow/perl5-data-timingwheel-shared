@@ -56,7 +56,7 @@ new(class, path = &PL_sv_undef, num_slots = 512, capacity = 0, ...)
         croak("Data::TimingWheel::Shared->new: capacity must be >= 1");
     const char *p = (SvGETMAGIC(path), SvOK(path)) ? SvPV_nolen(path) : NULL;
     TwHandle *h = tw_create(p, (uint64_t)num_slots, (uint64_t)capacity, mode, errbuf);
-    if (!h) croak("Data::TimingWheel::Shared->new: %s", errbuf);
+    if (!h) croak("Data::TimingWheel::Shared->new: %s", errbuf[0] ? errbuf : "out of memory");
     MAKE_OBJ(class, h);
   OUTPUT:
     RETVAL
@@ -74,7 +74,7 @@ new_memfd(class, name = &PL_sv_undef, num_slots = 512, capacity = 0)
     if (capacity < 1)
         croak("Data::TimingWheel::Shared->new_memfd: capacity must be >= 1");
     TwHandle *h = tw_create_memfd(nm, (uint64_t)num_slots, (uint64_t)capacity, errbuf);
-    if (!h) croak("Data::TimingWheel::Shared->new_memfd: %s", errbuf);
+    if (!h) croak("Data::TimingWheel::Shared->new_memfd: %s", errbuf[0] ? errbuf : "out of memory");
     MAKE_OBJ(class, h);
   OUTPUT:
     RETVAL
@@ -87,7 +87,7 @@ new_from_fd(class, fd)
     char errbuf[TW_ERR_BUFLEN];
   CODE:
     TwHandle *h = tw_open_fd(fd, errbuf);
-    if (!h) croak("Data::TimingWheel::Shared->new_from_fd: %s", errbuf);
+    if (!h) croak("Data::TimingWheel::Shared->new_from_fd: %s", errbuf[0] ? errbuf : "out of memory");
     MAKE_OBJ(class, h);
   OUTPUT:
     RETVAL

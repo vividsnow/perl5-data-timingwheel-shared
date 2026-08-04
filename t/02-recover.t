@@ -62,5 +62,14 @@ unlink $p;
     is_deeply(\@fired, [1234], "reopened wheel's timer still fires at its original tick");
     undef $r; unlink $p;
 }
+# 5. A magic==0 file of the right size but with NON-zero data (not a fresh
+#    ftruncate) is NOT recovered -- recovery only re-inits a provably-empty file.
+{
+    open my $zfh, '>', $p or die $!; truncate $zfh, $total or die $!; close $zfh;
+    open $zfh, '+<', $p or die $!; seek $zfh, $total - 1, 0; print $zfh "\x01"; close $zfh;
+    my $w = eval { Data::TimingWheel::Shared->new($p, 64, 100) };
+    ok(!$w, "new() refuses a magic==0 file that is not all-zero (no clobber of real data)");
+    undef $w; unlink $p;
+}
 
 done_testing;
