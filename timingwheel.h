@@ -696,6 +696,23 @@ static TwHandle *tw_create(const char *path, uint64_t num_slots, uint64_t capaci
         if (base == MAP_FAILED) { TW_ERR("mmap: %s", strerror(errno)); flock(fd, LOCK_UN); close(fd); return NULL; }
         if (!is_new) {
             if (!tw_validate_header((TwHeader *)base, (uint64_t)st.st_size)) {
+                /* Recover an abandoned mid-init file: a creator killed between the
+                 * ftruncate and tw_init_header below leaves a full-size, all-zero
+                 * (magic==0) file that would otherwise brick every future open of
+                 * this path.  Re-initialize it, but ONLY when it is exactly our
+                 * size, still uninitialized (magic==0), and owned by us -- a valid
+                 * or foreign file fails this and still errors, never clobbered. */
+                if (((TwHeader *)base)->magic == 0 && (uint64_t)st.st_size == total
+                    && st.st_uid == geteuid()) {
+                    if (fchmod(fd, mode) < 0) {
+                        TW_ERR("%s: fchmod: %s", path, strerror(errno));
+                        munmap(base, map_size); flock(fd, LOCK_UN); close(fd); return NULL;
+                    }
+                    memset(base, 0, map_size);   /* start from a provably empty wheel */
+                    tw_init_header(base, (uint32_t)num_slots, (uint32_t)capacity, total);
+                    flock(fd, LOCK_UN); close(fd);
+                    return tw_setup(base, map_size, path, -1);
+                }
                 TW_ERR("invalid timing-wheel file"); munmap(base, map_size); flock(fd, LOCK_UN); close(fd); return NULL;
             }
             flock(fd, LOCK_UN); close(fd);
