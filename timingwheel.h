@@ -722,7 +722,6 @@ static TwHandle *tw_create(const char *path, uint64_t num_slots, uint64_t capaci
                         TW_ERR("%s: fchmod: %s", path, strerror(errno));
                         munmap(base, map_size); flock(fd, LOCK_UN); close(fd); return NULL;
                     }
-                    memset(base, 0, map_size);   /* start from a provably empty wheel */
                     tw_init_header(base, (uint32_t)num_slots, (uint32_t)capacity, total);
                     flock(fd, LOCK_UN); close(fd);
                     return tw_setup(base, map_size, path, -1);
