@@ -104,6 +104,6 @@ jobs:
           perl-version: '5.40'
       - run: cpanm -n Devel::PPPort Time::HiRes Test::Pod
       - run: perl Makefile.PL && make
-      - run: AUTHOR_TESTING=1 prove -b -j2 xt/*.t
+      - run: AUTHOR_TESTING=1 prove -b xt/*.t
         env:
           AUTHOR_TESTING: 1
